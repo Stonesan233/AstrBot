@@ -25,6 +25,14 @@ class StaticFileRoute(Route):
             "/extension-marketplace",
             "/conversation",
             "/tool-use",
+            "/studio",
+            "/subagent",
+            "/persona",
+            "/cron",
+            "/session-management",
+            "/trace",
+            "/knowledge-base",
+            "/welcome",
         ]
         for i in index_:
             self.app.add_url_rule(i, view_func=self.index)

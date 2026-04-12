@@ -18,6 +18,7 @@ from .session_management import SessionManagementRoute
 from .skills import SkillsRoute
 from .stat import StatRoute
 from .static_file import StaticFileRoute
+from .studio import StudioRoute
 from .subagent import SubAgentRoute
 from .tools import ToolsRoute
 from .update import UpdateRoute
@@ -42,6 +43,7 @@ __all__ = [
     "SessionManagementRoute",
     "StatRoute",
     "StaticFileRoute",
+    "StudioRoute",
     "SubAgentRoute",
     "ToolsRoute",
     "SkillsRoute",
