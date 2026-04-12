@@ -117,6 +117,11 @@ const sidebarItem: menu[] = [
         to: '/subagent'
       },
       {
+        title: 'core.navigation.studio',
+        icon: 'mdi-account-group',
+        to: '/studio'
+      },
+      {
         title: 'core.navigation.dashboard',
         icon: 'mdi-view-dashboard',
         to: '/dashboard/default'
