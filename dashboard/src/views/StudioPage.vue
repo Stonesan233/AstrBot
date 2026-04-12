@@ -43,9 +43,22 @@
       </div>
     </div>
 
-    <!-- Engine Status Banner -->
+    <!-- Error banner -->
     <v-alert
-      v-if="!status.engineReady"
+      v-if="apiError"
+      type="error"
+      variant="tonal"
+      class="mb-4 rounded-lg"
+      density="compact"
+      closable
+      @click:close="apiError = ''"
+    >
+      {{ apiError }}
+    </v-alert>
+
+    <!-- Engine warning -->
+    <v-alert
+      v-if="!loading && !status.engineReady"
       type="warning"
       variant="tonal"
       class="mb-4 rounded-lg"
@@ -55,11 +68,11 @@
       执行引擎未连接，请检查 claudecode 插件是否正常加载
     </v-alert>
 
-    <!-- Main 3-column layout -->
+    <!-- Main 3-column layout: 25% / 50% / 25% -->
     <v-row>
-      <!-- Left: Members -->
-      <v-col cols="12" md="3" lg="2">
-        <v-card class="rounded-lg border-thin" variant="flat" border height="100%">
+      <!-- Left: Members (25%) -->
+      <v-col cols="12" md="3">
+        <v-card class="rounded-lg border-thin fill-height" variant="flat" border>
           <v-card-title class="d-flex align-center justify-space-between py-3 px-4">
             <div class="d-flex align-center gap-2">
               <v-icon icon="mdi-account-group" size="small" color="primary" />
@@ -70,38 +83,54 @@
             </v-chip>
           </v-card-title>
           <v-divider />
-          <v-card-text class="pa-2">
-            <div v-for="member in members" :key="member.name">
-              <v-list-item
-                :active="selectedMember === member.name"
-                class="rounded-lg mb-1"
-                @click="selectedMember = member.name"
-              >
-                <template #prepend>
-                  <v-avatar :color="getMemberColor(member.name)" size="32" class="mr-2">
-                    <span class="text-white text-caption font-weight-bold">
-                      {{ member.emoji || member.name[0] }}
-                    </span>
-                  </v-avatar>
-                </template>
-                <v-list-item-title class="text-body-2 font-weight-medium">
-                  {{ member.name }}
-                </v-list-item-title>
-                <v-list-item-subtitle class="text-caption text-medium-emphasis text-truncate">
-                  {{ member.persona_prompt?.substring(0, 30) || '暂无设定' }}...
-                </v-list-item-subtitle>
-              </v-list-item>
-            </div>
+
+          <!-- Loading skeleton -->
+          <v-card-text v-if="loading && members.length === 0" class="pa-4">
+            <v-skeleton-loader type="list-item@3" />
+          </v-card-text>
+
+          <v-card-text v-else class="pa-2">
+            <v-list-item
+              v-for="member in members"
+              :key="member.name"
+              :active="selectedMember === member.name"
+              class="rounded-lg mb-1"
+              @click="selectedMember = member.name"
+            >
+              <template #prepend>
+                <v-avatar :color="getMemberColor(member.name)" size="32" class="mr-2">
+                  <span class="text-white text-caption font-weight-bold">
+                    {{ getMemberInitial(member) }}
+                  </span>
+                </v-avatar>
+              </template>
+              <v-list-item-title class="text-body-2 font-weight-medium">
+                {{ member.name }}
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption text-medium-emphasis text-truncate">
+                {{ truncate(member.persona_prompt, 28) }}
+              </v-list-item-subtitle>
+              <template #append>
+                <v-btn
+                  icon="mdi-close-circle"
+                  variant="text"
+                  size="x-small"
+                  color="grey"
+                  @click.stop="removeMember(member.name)"
+                />
+              </template>
+            </v-list-item>
+
             <div v-if="members.length === 0" class="text-center py-6 text-medium-emphasis">
               <v-icon icon="mdi-account-off" size="40" class="mb-2 opacity-50" />
-              <div class="text-caption">暂无成员</div>
+              <div class="text-caption">暂无成员，点击上方添加</div>
             </div>
           </v-card-text>
         </v-card>
       </v-col>
 
-      <!-- Center: Collaboration Log -->
-      <v-col cols="12" md="5" lg="6">
+      <!-- Center: Collaboration Timeline (50%) -->
+      <v-col cols="12" md="6">
         <v-card class="rounded-lg border-thin" variant="flat" border>
           <v-card-title class="d-flex align-center justify-space-between py-3 px-4">
             <div class="d-flex align-center gap-2">
@@ -111,76 +140,101 @@
                 {{ statusLabel(activeConv.status) }}
               </v-chip>
             </div>
-            <v-btn
-              v-if="activeConv"
-              icon="mdi-close-circle-outline"
-              variant="text"
-              size="small"
-              color="error"
-              @click="resetConversation"
-            >
-              <v-tooltip activator="parent" location="top">重置协作</v-tooltip>
-            </v-btn>
+            <div class="d-flex align-center gap-1">
+              <v-btn
+                v-if="activeConv"
+                icon="mdi-close-circle-outline"
+                variant="text"
+                size="small"
+                color="error"
+                @click="resetConversation"
+              >
+                <v-tooltip activator="parent" location="top">重置协作</v-tooltip>
+              </v-btn>
+            </div>
           </v-card-title>
           <v-divider />
 
-          <!-- Chat log area -->
           <div class="chat-log pa-4" ref="chatLogRef">
-            <div v-if="!activeConv || activeConv.turns.length === 0" class="text-center py-12 text-medium-emphasis">
+            <!-- Loading skeleton -->
+            <div v-if="loading && !activeConv" class="pa-4">
+              <v-skeleton-loader type="card@2" />
+            </div>
+
+            <!-- Empty state -->
+            <div v-else-if="!activeConv || activeConv.turns.length === 0" class="text-center py-12 text-medium-emphasis">
               <v-icon icon="mdi-chat-processing-outline" size="64" class="mb-4 opacity-30" />
               <div class="text-body-1">暂无协作记录</div>
               <div class="text-caption mt-1">通过 /studio chat 命令启动协作</div>
             </div>
 
-            <template v-else>
-              <div
+            <!-- Timeline -->
+            <v-timeline v-else side="end" density="compact" align="start">
+              <v-timeline-item
                 v-for="(turn, idx) in activeConv.turns"
                 :key="idx"
-                class="turn-item mb-4"
+                :dot-color="getMemberColor(turn.to_member)"
+                :icon="turn.auto_delegated ? 'mdi-link-variant' : 'mdi-circle-small'"
+                size="small"
+                class="turn-item"
               >
                 <!-- Turn header -->
-                <div class="d-flex align-center gap-2 mb-2">
-                  <v-avatar :color="getMemberColor(turn.to_member)" size="24">
-                    <span class="text-white text-caption">
-                      {{ turn.to_member?.[0] || '?' }}
-                    </span>
-                  </v-avatar>
+                <div class="d-flex align-center gap-2 mb-1">
                   <span class="text-subtitle-2 font-weight-bold">{{ turn.to_member }}</span>
                   <v-chip v-if="turn.auto_delegated" size="x-small" variant="tonal" color="info" label>
                     自动委托
                   </v-chip>
                   <span class="text-caption text-medium-emphasis ml-auto">
-                    第 {{ idx + 1 }} 轮 · 来自 {{ turn.from_member }}
+                    R{{ idx + 1 }} · {{ turn.from_member }}
                   </span>
                 </div>
 
-                <!-- Task -->
-                <div class="turn-task pa-2 rounded bg-blue-grey-lighten-5 mb-2">
-                  <div class="text-caption font-weight-bold text-primary mb-1">任务</div>
-                  <div class="text-body-2">{{ turn.message }}</div>
-                </div>
+                <!-- Task bubble -->
+                <v-card class="mb-2 rounded-lg" variant="outlined" color="blue-grey-lighten-5">
+                  <v-card-text class="pa-2">
+                    <div class="text-caption font-weight-bold text-primary">任务</div>
+                    <div class="text-body-2">{{ turn.message }}</div>
+                  </v-card-text>
+                </v-card>
 
-                <!-- Response -->
-                <div class="turn-response pa-3 rounded-lg" style="background: rgb(var(--v-theme-surface))">
-                  <div class="text-caption font-weight-bold text-medium-emphasis mb-1">回复</div>
-                  <div class="text-body-2 response-content">{{ turn.response }}</div>
-                </div>
+                <!-- Response card -->
+                <v-card class="rounded-lg" variant="outlined">
+                  <v-card-text class="pa-3">
+                    <div class="text-caption font-weight-bold text-medium-emphasis mb-1">回复</div>
+                    <div class="response-content">
+                      <!-- Check if response contains code/diff -->
+                      <template v-if="hasCodeBlock(turn.response)">
+                        <div
+                          v-for="(seg, si) in parseResponse(turn.response)"
+                          :key="si"
+                        >
+                          <pre
+                            v-if="seg.type === 'code'"
+                            class="code-block rounded pa-3 mb-2"
+                          ><code>{{ seg.content }}</code></pre>
+                          <span v-else>{{ seg.content }}</span>
+                        </div>
+                      </template>
+                      <template v-else>{{ turn.response }}</template>
+                    </div>
+                  </v-card-text>
+                </v-card>
 
-                <!-- Delegation indicator -->
-                <div v-if="turn.delegated_to" class="d-flex align-center gap-1 mt-2 ml-4">
+                <!-- Delegation arrow -->
+                <div v-if="turn.delegated_to" class="d-flex align-center gap-1 mt-2 ml-2">
                   <v-icon icon="mdi-arrow-right-bottom" size="small" color="primary" />
                   <span class="text-caption text-primary font-weight-medium">
                     委托 → {{ turn.delegated_to }}
                   </span>
                 </div>
-              </div>
-            </template>
+              </v-timeline-item>
+            </v-timeline>
           </div>
         </v-card>
       </v-col>
 
-      <!-- Right: Status & Context -->
-      <v-col cols="12" md="4" lg="4">
+      <!-- Right: Status & Context (25%) -->
+      <v-col cols="12" md="3">
         <div class="d-flex flex-column gap-4">
           <!-- Task Status Card -->
           <v-card class="rounded-lg border-thin" variant="flat" border>
@@ -191,29 +245,29 @@
             <v-divider />
             <v-card-text class="pa-4">
               <div class="d-flex flex-column gap-3">
-                <div class="d-flex justify-space-between">
+                <div class="d-flex justify-space-between align-center">
                   <span class="text-body-2 text-medium-emphasis">执行引擎</span>
                   <v-chip :color="status.engineReady ? 'success' : 'error'" size="small" variant="tonal">
                     {{ status.engineReady ? '已连接' : '未连接' }}
                   </v-chip>
                 </div>
-                <div class="d-flex justify-space-between">
+                <div class="d-flex justify-space-between align-center">
                   <span class="text-body-2 text-medium-emphasis">自动委托</span>
                   <v-chip :color="status.autoDelegate ? 'success' : 'grey'" size="small" variant="tonal">
-                    {{ status.autoDelegate ? '已开启' : '已关闭' }}
+                    {{ status.autoDelegate ? '开启' : '关闭' }}
                   </v-chip>
                 </div>
-                <div class="d-flex justify-space-between">
+                <div class="d-flex justify-space-between align-center">
                   <span class="text-body-2 text-medium-emphasis">智能停止</span>
                   <v-chip :color="status.autoStop ? 'success' : 'grey'" size="small" variant="tonal">
-                    {{ status.autoStop ? '已开启' : '已关闭' }}
+                    {{ status.autoStop ? '开启' : '关闭' }}
                   </v-chip>
                 </div>
-                <div class="d-flex justify-space-between">
+                <div class="d-flex justify-space-between align-center">
                   <span class="text-body-2 text-medium-emphasis">轮次上限</span>
                   <span class="text-body-2 font-weight-medium">{{ status.maxRounds }}</span>
                 </div>
-                <div class="d-flex justify-space-between">
+                <div class="d-flex justify-space-between align-center">
                   <span class="text-body-2 text-medium-emphasis">活跃会话</span>
                   <span class="text-body-2 font-weight-medium">{{ status.activeCount }} / {{ status.totalCount }}</span>
                 </div>
@@ -255,11 +309,11 @@
                   <span v-else class="text-caption text-medium-emphasis">无</span>
                 </div>
                 <div>
-                  <div class="text-caption text-medium-emphasis mb-1">协作轮次</div>
+                  <div class="text-caption text-medium-emphasis mb-1">协作进度</div>
                   <div class="d-flex align-center gap-2">
                     <v-progress-linear
-                      :model-value="(activeConv.turns.length / activeConv.max_rounds) * 100"
-                      :color="activeConv.turns.length >= activeConv.max_rounds ? 'error' : 'primary'"
+                      :model-value="progressPercent"
+                      :color="progressColor"
                       height="6"
                       rounded
                       class="flex-grow-1"
@@ -288,22 +342,10 @@
             <v-divider />
             <v-card-text class="pa-4">
               <div class="d-flex flex-column gap-2">
-                <v-btn
-                  variant="outlined"
-                  block
-                  size="small"
-                  prepend-icon="mdi-refresh"
-                  @click="loadAll"
-                >
+                <v-btn variant="outlined" block size="small" prepend-icon="mdi-refresh" @click="loadAll">
                   刷新状态
                 </v-btn>
-                <v-btn
-                  variant="outlined"
-                  block
-                  size="small"
-                  prepend-icon="mdi-history"
-                  @click="loadHistory"
-                >
+                <v-btn variant="outlined" block size="small" prepend-icon="mdi-history" @click="loadHistory">
                   查看完整历史
                 </v-btn>
                 <v-btn
@@ -312,6 +354,7 @@
                   size="small"
                   color="error"
                   prepend-icon="mdi-delete-outline"
+                  :disabled="!activeConv"
                   @click="resetConversation"
                 >
                   重置当前协作
@@ -423,6 +466,11 @@ type StudioStatus = {
   autoReview: boolean
 }
 
+type ResponseSegment = {
+  type: 'text' | 'code'
+  content: string
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -433,6 +481,7 @@ const autoRefresh = ref(true)
 const showAddMember = ref(false)
 const selectedMember = ref<string | null>(null)
 const chatLogRef = ref<HTMLElement | null>(null)
+const apiError = ref('')
 
 const snackbar = ref({ show: false, message: '', color: 'success' })
 
@@ -460,6 +509,23 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 // Computed
 // ---------------------------------------------------------------------------
 
+const progressPercent = computed(() => {
+  if (!activeConv.value) return 0
+  return (activeConv.value.turns.length / activeConv.value.max_rounds) * 100
+})
+
+const progressColor = computed(() => {
+  if (!activeConv.value) return 'primary'
+  const ratio = activeConv.value.turns.length / activeConv.value.max_rounds
+  if (ratio >= 1) return 'error'
+  if (ratio >= 0.7) return 'warning'
+  return 'primary'
+})
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 const memberColors: Record<string, string> = {}
 const colorPalette = [
   'deep-purple', 'blue', 'teal', 'indigo', 'cyan',
@@ -472,6 +538,18 @@ function getMemberColor(name: string): string {
     memberColors[name] = colorPalette[idx]
   }
   return memberColors[name]
+}
+
+function getMemberInitial(member: Member): string {
+  if (member.emoji && member.emoji !== '🤖') {
+    return member.emoji
+  }
+  return member.name[0]
+}
+
+function truncate(text: string, max: number): string {
+  if (!text) return '暂无设定'
+  return text.length > max ? text.substring(0, max) + '...' : text
 }
 
 function statusColor(s: string): string {
@@ -488,10 +566,6 @@ function statusLabel(s: string): string {
   return map[s] || s
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function toast(message: string, color: 'success' | 'error' | 'warning' = 'success') {
   snackbar.value = { show: true, message, color }
 }
@@ -502,6 +576,35 @@ function scrollToBottom() {
       chatLogRef.value.scrollTop = chatLogRef.value.scrollHeight
     }
   }, 100)
+}
+
+// ---------------------------------------------------------------------------
+// Response parsing (code/diff detection)
+// ---------------------------------------------------------------------------
+
+const codeBlockRe = /```[\w]*\n([\s\S]*?)```/g
+
+function hasCodeBlock(text: string): boolean {
+  return codeBlockRe.test(text)
+}
+
+function parseResponse(text: string): ResponseSegment[] {
+  const segments: ResponseSegment[] = []
+  let lastIndex = 0
+  // Reset regex state
+  codeBlockRe.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = codeBlockRe.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ type: 'text', content: text.slice(lastIndex, match.index) })
+    }
+    segments.push({ type: 'code', content: match[1].trim() })
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) {
+    segments.push({ type: 'text', content: text.slice(lastIndex) })
+  }
+  return segments.length > 0 ? segments : [{ type: 'text', content: text }]
 }
 
 // ---------------------------------------------------------------------------
@@ -524,7 +627,6 @@ async function loadStatus() {
         persistMembers: d.persist_members !== false,
         autoReview: d.auto_review === true,
       }
-      // Parse members from status text
       if (d.members && typeof d.members === 'object') {
         members.value = Object.entries(d.members).map(([name, info]: [string, any]) => ({
           name,
@@ -533,10 +635,14 @@ async function loadStatus() {
           created_at: info.created_at || 0,
         }))
       }
+      apiError.value = ''
     }
   } catch (e: any) {
-    // Studio plugin might not expose API yet, fail silently
-    console.warn('Studio status API unavailable:', e?.message)
+    if (e?.response?.status === 404) {
+      apiError.value = 'Studio API 未就绪，请确认插件已注册 /api/studio/* 路由'
+    } else {
+      console.warn('Studio status API error:', e?.message)
+    }
   }
 }
 
@@ -547,16 +653,18 @@ async function loadHistory() {
       const data = res.data.data
       if (data && typeof data === 'object') {
         conversations.value = Object.values(data) as Conversation[]
-        // Pick the most recently updated conversation
         const active = conversations.value
           .filter((c) => c.turns && c.turns.length > 0)
           .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
+        const prevTurns = activeConv.value?.turns.length ?? 0
         activeConv.value = active[0] || null
-        scrollToBottom()
+        if (activeConv.value && activeConv.value.turns.length > prevTurns) {
+          scrollToBottom()
+        }
       }
     }
   } catch (e: any) {
-    console.warn('Studio history API unavailable:', e?.message)
+    console.warn('Studio history API error:', e?.message)
   }
 }
 
@@ -606,7 +714,7 @@ async function removeMember(name: string) {
   try {
     const res = await axios.delete('/api/studio/member', { data: { name } })
     if (res.data.status === 'ok') {
-      toast(`已移除成员「${name}」`)
+      toast(`已移除「${name}」`)
       await loadAll()
     }
   } catch (e: any) {
@@ -624,15 +732,12 @@ async function loadAll() {
 }
 
 // ---------------------------------------------------------------------------
-// Auto-refresh
+// Auto-refresh (3 seconds)
 // ---------------------------------------------------------------------------
 
 watch(autoRefresh, (val) => {
-  if (val) {
-    startAutoRefresh()
-  } else {
-    stopAutoRefresh()
-  }
+  if (val) startAutoRefresh()
+  else stopAutoRefresh()
 })
 
 function startAutoRefresh() {
@@ -640,7 +745,7 @@ function startAutoRefresh() {
   refreshTimer = setInterval(() => {
     loadStatus()
     loadHistory()
-  }, 5000)
+  }, 3000)
 }
 
 function stopAutoRefresh() {
@@ -656,9 +761,7 @@ function stopAutoRefresh() {
 
 onMounted(() => {
   loadAll()
-  if (autoRefresh.value) {
-    startAutoRefresh()
-  }
+  if (autoRefresh.value) startAutoRefresh()
 })
 
 onUnmounted(() => {
@@ -673,16 +776,10 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
-.gap-2 {
-  gap: 8px;
-}
-
-.gap-4 {
-  gap: 16px;
-}
+.gap-2 { gap: 8px; }
 
 .chat-log {
-  height: 520px;
+  height: 560px;
   overflow-y: auto;
   scroll-behavior: smooth;
 }
@@ -705,15 +802,10 @@ onUnmounted(() => {
   to { opacity: 1; transform: translateY(0); }
 }
 
-.turn-response {
-  background: rgb(var(--v-theme-surface));
-  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
-}
-
 .response-content {
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 200px;
+  max-height: 240px;
   overflow-y: auto;
   font-size: 0.85rem;
   line-height: 1.5;
@@ -726,5 +818,14 @@ onUnmounted(() => {
 .response-content::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.1);
   border-radius: 3px;
+}
+
+.code-block {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  overflow-x: auto;
 }
 </style>
