@@ -1,3 +1,4 @@
+import asyncio
 import traceback
 
 from quart import jsonify, request
@@ -6,6 +7,25 @@ from astrbot.core import logger
 from astrbot.core.core_lifecycle import AstrBotCoreLifecycle
 
 from .route import Response, Route, RouteContext
+
+
+class _DashboardEvent:
+    """轻量级 event stub，用于从 Dashboard 触发 studio chat。
+
+    提供 _internal_delegate 所需的最小接口：
+    - unified_msg_origin / sender_id  → 用于 session_id 生成
+    - send()                         → 中间进度推送（dashboard 用轮询，此处 no-op）
+    """
+    def __init__(self, message_str: str = ""):
+        self.unified_msg_origin = "dashboard"
+        self.sender_id = "dashboard_user"
+        self.message_str = message_str
+
+    async def send(self, msg: str):
+        pass  # Dashboard 通过轮询 /history 获取实时更新
+
+    def plain_result(self, text: str):
+        return text
 
 
 class StudioRoute(Route):
@@ -24,6 +44,7 @@ class StudioRoute(Route):
         self.routes = [
             ("/studio/status", ("GET", self.get_status)),
             ("/studio/history", ("GET", self.get_history)),
+            ("/studio/chat", ("POST", self.send_chat)),
             ("/studio/member", ("POST", self.add_member)),
             ("/studio/member", ("DELETE", self.remove_member)),
             ("/studio/reset", ("POST", self.reset_conversation)),
@@ -150,6 +171,56 @@ class StudioRoute(Route):
         except Exception as e:
             logger.error(traceback.format_exc())
             return jsonify(Response().error(f"获取 Studio 历史失败: {e!s}").__dict__)
+
+    # ------------------------------------------------------------------
+    # POST /api/studio/chat
+    # ------------------------------------------------------------------
+
+    async def send_chat(self):
+        """接收前端消息，在后台启动 studio 协作，立即返回。
+        前端通过轮询 /studio/history 观察实时进度。
+        """
+        try:
+            plugin = self._find_studio_plugin()
+            if plugin is None:
+                return jsonify(Response().error("Studio 插件未加载").__dict__)
+
+            data = await request.json
+            if not isinstance(data, dict):
+                return jsonify(Response().error("请求必须为 JSON 对象").__dict__)
+
+            message = (data.get("message") or "").strip()
+            if not message:
+                return jsonify(Response().error("消息不能为空").__dict__)
+
+            # 检查是否有正在进行的协作
+            conversations = getattr(plugin, "conversations", {})
+            for conv in conversations.values():
+                if conv.get("status") == "active":
+                    return jsonify(
+                        Response().error("已有协作正在进行中，请等待完成或重置后再试").__dict__
+                    )
+
+            # 创建 mock event 并在后台启动协作
+            mock_event = _DashboardEvent(message_str=f"/studio chat {message}")
+
+            async def _run():
+                try:
+                    result = await plugin._handle_chat(mock_event, message)
+                    logger.info(f"[StudioRoute] chat completed: {result[:100]}")
+                except Exception as exc:
+                    logger.error(f"[StudioRoute] chat error: {exc}\n{traceback.format_exc()}")
+                    # 确保会话状态不会卡在 active
+                    for conv in getattr(plugin, "conversations", {}).values():
+                        if conv.get("status") == "active":
+                            conv["status"] = "error"
+
+            asyncio.ensure_future(_run())
+
+            return jsonify(Response().ok(message="协作已启动，请观察协作记录").__dict__)
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            return jsonify(Response().error(f"发送消息失败: {e!s}").__dict__)
 
     # ------------------------------------------------------------------
     # POST /api/studio/member
