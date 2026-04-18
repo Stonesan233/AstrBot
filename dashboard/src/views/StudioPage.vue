@@ -57,7 +57,7 @@
         </v-card>
       </v-col>
 
-      <!-- ====== Center: Chat Room ====== -->
+      <!-- ====== Center: Chat History (v-timeline) ====== -->
       <v-col cols="12" md="6">
         <v-card class="chat-card rounded-lg border-thin d-flex flex-column" variant="flat" border>
           <!-- Title bar -->
@@ -65,92 +65,119 @@
             <div class="d-flex align-center ga-2">
               <v-icon icon="mdi-forum-outline" size="small" color="primary" />
               <span class="text-subtitle-2 font-weight-bold">协作记录</span>
-              <v-chip v-if="activeConv" size="x-small" :color="convStatusColor" variant="tonal">{{ convStatusLabel }}</v-chip>
+              <v-chip v-if="isConvActive" size="x-small" color="info" variant="tonal">进行中</v-chip>
               <span v-if="isConvActive" class="live-dot" />
+              <span v-if="taskGroups.length > 0" class="text-caption text-medium-emphasis">{{ taskGroups.length }} 个任务</span>
             </div>
             <div class="d-flex align-center ga-2">
-              <span v-if="activeConv" class="text-caption text-medium-emphasis">{{ activeConv.turns.length }} / {{ activeConv.max_rounds }}</span>
-              <v-btn v-if="activeConv" icon="mdi-delete-outline" variant="text" size="small" color="error" @click="resetConversation">
-                <v-tooltip activator="parent" location="top">重置</v-tooltip>
+              <v-btn icon="mdi-delete-sweep-outline" variant="text" size="small" color="error" @click="resetConversation">
+                <v-tooltip activator="parent" location="top">清空所有记录</v-tooltip>
               </v-btn>
             </div>
           </v-card-title>
           <v-divider />
 
-          <!-- Chat messages area -->
+          <!-- Timeline messages area -->
           <div class="chat-messages flex-grow-1" ref="chatLogRef">
             <!-- Loading skeleton -->
-            <div v-if="loading && chatMessages.length === 0" class="pa-4">
+            <div v-if="loading && allTurns.length === 0" class="pa-4">
               <v-skeleton-loader type="card@3" />
             </div>
 
             <!-- Empty state -->
-            <div v-else-if="chatMessages.length === 0" class="d-flex flex-column align-center justify-center fill-height text-medium-emphasis">
+            <div v-else-if="allTurns.length === 0" class="d-flex flex-column align-center justify-center fill-height text-medium-emphasis">
               <v-icon icon="mdi-chat-processing-outline" size="56" class="mb-3 opacity-20" />
               <div class="text-body-2">暂无协作记录</div>
               <div class="text-caption mt-1">在下方输入任务启动协作</div>
             </div>
 
-            <!-- Messages list -->
+            <!-- v-timeline with all history -->
             <div v-else class="pa-4">
-              <template v-for="msg in chatMessages" :key="msg.id">
-                <!-- Delegation indicator (centered) -->
-                <div v-if="msg.type === 'system'" class="delegation-center d-flex align-center justify-center my-3">
-                  <div class="d-flex align-center ga-1 px-3 py-1 rounded-pill delegation-pill">
-                    <v-chip size="x-small" :color="getMemberColor(msg.sender)" variant="tonal" label>{{ msg.sender }}</v-chip>
-                    <v-icon :icon="msg.autoDelegated ? 'mdi-swap-horizontal-bold' : 'mdi-arrow-right'" size="small" :color="msg.autoDelegated ? 'orange' : 'primary'" />
-                    <v-chip size="x-small" :color="getMemberColor(msg.delegateTo || '')" variant="tonal" label>{{ msg.delegateTo }}</v-chip>
-                    <v-chip v-if="msg.autoDelegated" size="x-small" variant="tonal" color="orange" label class="ml-1">自动</v-chip>
-                  </div>
-                </div>
-
-                <!-- Chat bubble row -->
-                <div v-else class="chat-row d-flex mb-3" :class="[msg.side === 'right' ? 'flex-row-reverse' : '']">
-                  <!-- Avatar -->
-                  <v-avatar :color="getMemberColor(msg.sender)" size="30" class="chat-avatar flex-shrink-0 mt-5">
-                    <span class="text-white font-weight-bold" style="font-size:11px">{{ msg.sender[0] }}</span>
-                  </v-avatar>
-
-                  <!-- Bubble area -->
-                  <div class="bubble-area" :class="[msg.side === 'right' ? 'mr-2 text-right' : 'ml-2 text-left']">
-                    <!-- Meta: name + time -->
-                    <div class="chat-meta d-flex mb-1" :style="{ justifyContent: msg.side === 'right' ? 'flex-end' : 'flex-start' }">
-                      <span class="chat-name font-weight-bold" :style="{ color: memberTextColor(msg.sender), fontSize: '0.8rem' }">{{ msg.sender }}</span>
-                      <span class="chat-time text-medium-emphasis mx-2">{{ formatTime(msg.time) }}</span>
+              <v-timeline side="end" density="compact" align="start">
+                <template v-for="(msg, idx) in chatMessages" :key="msg.id">
+                  <!-- Task group separator -->
+                  <v-timeline-item
+                    v-if="msg.type === 'task-header'"
+                    size="small"
+                    dot-color="primary"
+                    class="task-header-item"
+                  >
+                    <template #icon>
+                      <v-icon icon="mdi-play-circle-outline" size="16" color="white" />
+                    </template>
+                    <div class="d-flex align-center ga-2 my-1">
+                      <v-chip size="x-small" variant="tonal" color="primary" label>
+                        任务 #{{ msg.taskIndex + 1 }}
+                      </v-chip>
+                      <span class="text-caption text-medium-emphasis">{{ formatTime(msg.time) }}</span>
+                      <v-chip v-if="msg.isActive" size="x-small" variant="tonal" color="info" label>
+                        <span class="live-dot-sm" /> 进行中
+                      </v-chip>
+                      <v-chip v-else size="x-small" variant="tonal" color="success" label>已完成</v-chip>
+                      <span class="text-caption text-medium-emphasis">{{ msg.from }} → {{ msg.to }}</span>
                     </div>
+                  </v-timeline-item>
 
-                    <!-- Bubble -->
-                    <div class="chat-bubble" :class="[msg.side === 'right' ? 'right-bubble' : 'left-bubble']" :style="bubbleStyle(msg)">
-                      <!-- Task header with delegation arrow -->
-                      <div v-if="msg.type === 'task' && msg.delegateTo" class="task-header d-flex align-center ga-1 mb-2 pb-1" style="border-bottom: 1px dashed rgba(0,0,0,0.1)">
+                  <!-- Task message bubble -->
+                  <v-timeline-item
+                    v-else-if="msg.type === 'task'"
+                    :dot-color="getMemberColor(msg.sender)"
+                    size="x-small"
+                  >
+                    <div class="chat-bubble left-bubble" :style="bubbleStyle(msg)">
+                      <div class="d-flex align-center ga-1 mb-1">
                         <v-icon icon="mdi-clipboard-text-outline" size="14" :color="getMemberColor(msg.sender)" />
                         <span class="text-caption font-weight-bold">任务</span>
-                        <v-icon icon="mdi-arrow-right" size="14" color="primary" />
-                        <v-chip size="x-small" :color="getMemberColor(msg.delegateTo)" variant="tonal" label>{{ msg.delegateTo }}</v-chip>
+                        <span class="text-caption text-medium-emphasis ml-auto">from {{ msg.sender }}</span>
                       </div>
+                      <div class="msg-text">{{ msg.content }}</div>
+                    </div>
+                  </v-timeline-item>
 
-                      <!-- Content -->
-                      <div v-if="msg.type === 'response'" class="response-text">
-                        <template v-if="hasCode(msg.content)">
-                          <template v-for="(seg, si) in parseCode(msg.content)" :key="si">
-                            <pre v-if="seg.type === 'code'" class="code-block rounded pa-2 mb-1"><code>{{ seg.content }}</code></pre>
-                            <span v-else style="white-space:pre-wrap">{{ seg.content }}</span>
-                          </template>
+                  <!-- Response message bubble -->
+                  <v-timeline-item
+                    v-else-if="msg.type === 'response'"
+                    :dot-color="getMemberColor(msg.sender)"
+                    size="x-small"
+                  >
+                    <div class="chat-bubble left-bubble" :style="bubbleStyle(msg)">
+                      <div class="d-flex align-center ga-1 mb-1">
+                        <v-avatar :color="getMemberColor(msg.sender)" size="18">
+                          <span class="text-white font-weight-bold" style="font-size:9px">{{ msg.sender[0] }}</span>
+                        </v-avatar>
+                        <span class="chat-name font-weight-bold" :style="{ color: memberTextColor(msg.sender), fontSize: '0.8rem' }">{{ msg.sender }}</span>
+                        <span class="text-caption text-medium-emphasis ml-auto">{{ formatTime(msg.time) }}</span>
+                      </div>
+                      <div v-if="hasCode(msg.content)" class="response-text">
+                        <template v-for="(seg, si) in parseCode(msg.content)" :key="si">
+                          <pre v-if="seg.type === 'code'" class="code-block rounded pa-2 mb-1"><code>{{ seg.content }}</code></pre>
+                          <span v-else style="white-space:pre-wrap">{{ seg.content }}</span>
                         </template>
-                        <template v-else>{{ msg.content }}</template>
                       </div>
-                      <div v-else class="msg-text">{{ msg.content }}</div>
-
-                      <!-- Copy button for responses -->
-                      <div v-if="msg.type === 'response'" class="d-flex mt-1" :style="{ justifyContent: msg.side === 'right' ? 'flex-start' : 'flex-end' }">
+                      <div v-else class="response-text">{{ msg.content }}</div>
+                      <div class="d-flex mt-1" style="justify-content:flex-end">
                         <v-btn icon="mdi-content-copy" variant="text" size="x-small" color="grey" density="compact" @click="copyText(msg.content)">
                           <v-tooltip activator="parent" location="bottom">复制</v-tooltip>
                         </v-btn>
                       </div>
                     </div>
-                  </div>
-                </div>
-              </template>
+                  </v-timeline-item>
+
+                  <!-- Delegation indicator -->
+                  <v-timeline-item
+                    v-else-if="msg.type === 'system'"
+                    size="x-small"
+                    :dot-color="msg.autoDelegated ? 'orange' : 'primary'"
+                  >
+                    <div class="d-flex align-center ga-1 my-1 px-2 py-1 rounded-pill delegation-pill">
+                      <v-chip size="x-small" :color="getMemberColor(msg.sender)" variant="tonal" label>{{ msg.sender }}</v-chip>
+                      <v-icon :icon="msg.autoDelegated ? 'mdi-swap-horizontal-bold' : 'mdi-arrow-right'" size="small" :color="msg.autoDelegated ? 'orange' : 'primary'" />
+                      <v-chip size="x-small" :color="getMemberColor(msg.delegateTo || '')" variant="tonal" label>{{ msg.delegateTo }}</v-chip>
+                      <v-chip v-if="msg.autoDelegated" size="x-small" variant="tonal" color="orange" label>LLM自主</v-chip>
+                    </div>
+                  </v-timeline-item>
+                </template>
+              </v-timeline>
             </div>
           </div>
 
@@ -207,7 +234,7 @@
                   <v-chip :color="status.engineReady ? 'success' : 'error'" size="small" variant="tonal">{{ status.engineReady ? '已连接' : '未连接' }}</v-chip>
                 </div>
                 <div class="d-flex justify-space-between align-center">
-                  <span class="text-body-2 text-medium-emphasis">自动委托</span>
+                  <span class="text-body-2 text-medium-emphasis">LLM 自主委托</span>
                   <v-chip :color="status.autoDelegate ? 'success' : 'grey'" size="small" variant="tonal">{{ status.autoDelegate ? '开' : '关' }}</v-chip>
                 </div>
                 <div class="d-flex justify-space-between align-center">
@@ -215,18 +242,19 @@
                   <span class="text-body-2 font-weight-bold">{{ status.maxRounds }}</span>
                 </div>
                 <div class="d-flex justify-space-between align-center">
-                  <span class="text-body-2 text-medium-emphasis">活跃会话</span>
-                  <span class="text-body-2 font-weight-bold">{{ status.activeCount }} / {{ status.totalCount }}</span>
+                  <span class="text-body-2 text-medium-emphasis">历史任务</span>
+                  <span class="text-body-2 font-weight-bold">{{ taskGroups.length }}</span>
                 </div>
               </div>
             </v-card-text>
           </v-card>
 
-          <!-- Context -->
-          <v-card v-if="activeConv" class="rounded-lg border-thin" variant="flat" border>
+          <!-- Current task context -->
+          <v-card v-if="currentTaskTurns.length > 0" class="rounded-lg border-thin" variant="flat" border>
             <v-card-title class="d-flex align-center ga-2 py-3 px-4">
               <v-icon icon="mdi-brain" size="small" color="deep-purple" />
-              <span class="text-subtitle-2 font-weight-bold">上下文</span>
+              <span class="text-subtitle-2 font-weight-bold">当前任务</span>
+              <v-chip v-if="isConvActive" size="x-small" color="info" variant="tonal">进行中</v-chip>
             </v-card-title>
             <v-divider />
             <v-card-text class="pa-4">
@@ -234,23 +262,9 @@
                 <div>
                   <div class="d-flex justify-space-between mb-1">
                     <span class="text-caption text-medium-emphasis">进度</span>
-                    <span class="text-caption font-weight-bold">{{ activeConv.turns.length }} / {{ activeConv.max_rounds }}</span>
+                    <span class="text-caption font-weight-bold">{{ currentTaskTurns.length }} / {{ status.maxRounds }}</span>
                   </div>
-                  <v-progress-linear :model-value="progressPct" :color="progressClr" height="6" rounded />
-                </div>
-                <div class="d-flex justify-space-between align-center">
-                  <span class="text-body-2 text-medium-emphasis">最近修改</span>
-                  <v-chip v-if="activeConv.last_modified_by" size="small" :color="getMemberColor(activeConv.last_modified_by)" variant="tonal">{{ activeConv.last_modified_by }}</v-chip>
-                  <span v-else class="text-caption text-medium-emphasis">-</span>
-                </div>
-                <div class="d-flex justify-space-between align-center">
-                  <span class="text-body-2 text-medium-emphasis">最近审查</span>
-                  <v-chip v-if="activeConv.last_review_by" size="small" :color="getMemberColor(activeConv.last_review_by)" variant="tonal">{{ activeConv.last_review_by }}</v-chip>
-                  <span v-else class="text-caption text-medium-emphasis">-</span>
-                </div>
-                <div class="d-flex justify-space-between align-center">
-                  <span class="text-body-2 text-medium-emphasis">自动委托次数</span>
-                  <v-chip size="small" variant="tonal" color="orange">{{ activeConv.auto_delegate_count || 0 }}</v-chip>
+                  <v-progress-linear :model-value="currentProgressPct" :color="currentProgressClr" height="6" rounded />
                 </div>
               </div>
             </v-card-text>
@@ -296,6 +310,7 @@ import axios from 'axios'
 // ---------------------------------------------------------------------------
 
 type Turn = {
+  task_id: string
   from_member: string
   to_member: string
   message: string
@@ -303,18 +318,7 @@ type Turn = {
   delegated_to: string | null
   auto_delegated: boolean
   timestamp: number
-}
-
-type Conv = {
-  id: string
-  turns: Turn[]
-  status: string
-  max_rounds: number
-  created_at: number
-  updated_at: number
-  last_modified_by: string | null
-  last_review_by: string | null
-  auto_delegate_count: number
+  session_id?: string
 }
 
 type ChatMsg = {
@@ -322,10 +326,15 @@ type ChatMsg = {
   sender: string
   content: string
   time: number
-  type: 'task' | 'response' | 'system'
+  type: 'task-header' | 'task' | 'response' | 'system'
   delegateTo?: string
   autoDelegated?: boolean
   side: 'left' | 'right'
+  task_id: string
+  taskIndex?: number
+  isActive?: boolean
+  from?: string
+  to?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -343,14 +352,15 @@ const snackbar = ref({ show: false, message: '', color: 'success' })
 const status = ref({
   engineReady: false,
   autoDelegate: false,
-  autoStop: false,
   maxRounds: 10,
-  activeCount: 0,
-  totalCount: 0,
 })
 
 const members = ref<{ name: string; persona_prompt: string }[]>([])
-const activeConv = ref<Conv | null>(null)
+
+// All-history data
+const allTurns = ref<Turn[]>([])
+const activeTaskId = ref('')
+const convStatus = ref('idle')
 
 const chatInput = ref('')
 const chatTarget = ref('')
@@ -364,38 +374,69 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 // Derived
 // ---------------------------------------------------------------------------
 
-const isConvActive = computed(() => activeConv.value?.status === 'active')
+const isConvActive = computed(() => convStatus.value === 'active')
 
-const convStatusColor = computed(() => {
-  const m: Record<string, string> = { active: 'info', completed: 'success', timeout: 'warning', error: 'error', idle: 'grey' }
-  return m[activeConv.value?.status ?? ''] ?? 'grey'
+// Group turns by task_id, preserving order
+const taskGroups = computed(() => {
+  const groups: { task_id: string; turns: Turn[] }[] = []
+  let currentTaskId = ''
+  for (const turn of allTurns.value) {
+    const tid = turn.task_id || '_unknown'
+    if (tid !== currentTaskId) {
+      groups.push({ task_id: tid, turns: [] })
+      currentTaskId = tid
+    }
+    groups[groups.length - 1].turns.push(turn)
+  }
+  return groups
 })
 
-const convStatusLabel = computed(() => {
-  const m: Record<string, string> = { active: '进行中', completed: '已完成', timeout: '超时', error: '错误', idle: '空闲' }
-  return m[activeConv.value?.status ?? ''] ?? ''
+// Turns for the currently active task (for progress display)
+const currentTaskTurns = computed(() => {
+  if (!activeTaskId.value) return []
+  return allTurns.value.filter(t => t.task_id === activeTaskId.value)
 })
 
-const progressPct = computed(() => {
-  if (!activeConv.value) return 0
-  return Math.min((activeConv.value.turns.length / activeConv.value.max_rounds) * 100, 100)
+const currentProgressPct = computed(() => {
+  if (!currentTaskTurns.value.length) return 0
+  return Math.min((currentTaskTurns.value.length / status.value.maxRounds) * 100, 100)
 })
 
-const progressClr = computed(() => {
-  if (!activeConv.value) return 'primary'
-  const r = activeConv.value.turns.length / activeConv.value.max_rounds
+const currentProgressClr = computed(() => {
+  const r = currentTaskTurns.value.length / status.value.maxRounds
   return r >= 1 ? 'error' : r >= 0.7 ? 'warning' : 'primary'
 })
 
 // ---------------------------------------------------------------------------
-// Flatten turns → chat messages
+// Flatten all turns → chat messages (with task headers)
 // ---------------------------------------------------------------------------
 
 const chatMessages = computed<ChatMsg[]>(() => {
-  if (!activeConv.value) return []
   const msgs: ChatMsg[] = []
-  activeConv.value.turns.forEach((turn, i) => {
-    // 1) Task message (from_member → to_member)
+  let prevTaskId = ''
+
+  allTurns.value.forEach((turn, i) => {
+    const tid = turn.task_id || '_unknown'
+
+    // Task header when task_id changes
+    if (tid !== prevTaskId) {
+      msgs.push({
+        id: `h-${tid}`,
+        sender: turn.from_member,
+        content: turn.message,
+        time: turn.timestamp,
+        type: 'task-header',
+        side: 'left',
+        task_id: tid,
+        taskIndex: msgs.filter(m => m.type === 'task-header').length,
+        isActive: tid === activeTaskId.value && isConvActive.value,
+        from: turn.from_member,
+        to: turn.to_member,
+      })
+      prevTaskId = tid
+    }
+
+    // Task message
     msgs.push({
       id: `t${i}-task`,
       sender: turn.from_member,
@@ -404,8 +445,10 @@ const chatMessages = computed<ChatMsg[]>(() => {
       type: 'task',
       delegateTo: turn.to_member,
       side: getMemberSide(turn.from_member),
+      task_id: tid,
     })
-    // 2) Response message (to_member replies)
+
+    // Response message
     msgs.push({
       id: `t${i}-resp`,
       sender: turn.to_member,
@@ -413,8 +456,10 @@ const chatMessages = computed<ChatMsg[]>(() => {
       time: turn.timestamp,
       type: 'response',
       side: getMemberSide(turn.to_member),
+      task_id: tid,
     })
-    // 3) Delegation indicator (if delegated further)
+
+    // Delegation indicator
     if (turn.delegated_to) {
       msgs.push({
         id: `t${i}-del`,
@@ -425,9 +470,11 @@ const chatMessages = computed<ChatMsg[]>(() => {
         delegateTo: turn.delegated_to,
         autoDelegated: turn.auto_delegated,
         side: getMemberSide(turn.to_member),
+        task_id: tid,
       })
     }
   })
+
   return msgs
 })
 
@@ -457,7 +504,7 @@ function memberTextColor(name: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Member side (left / right) — deterministic
+// Member side (left / right)
 // ---------------------------------------------------------------------------
 
 const _namedSide: Record<string, 'left' | 'right'> = {
@@ -469,7 +516,6 @@ function getMemberSide(name: string): 'left' | 'right' {
   if (_namedSide[name]) return _namedSide[name]
   const idx = members.value.findIndex(m => m.name === name)
   if (idx >= 0) return idx % 2 === 0 ? 'left' : 'right'
-  // Fallback: hash-based
   let h = 0
   for (const c of name) h = ((h << 5) - h + c.charCodeAt(0)) | 0
   return h % 2 === 0 ? 'left' : 'right'
@@ -537,10 +583,7 @@ async function loadStatus() {
       status.value = {
         engineReady: !!d.engine_ok,
         autoDelegate: d.auto_delegate !== false,
-        autoStop: d.auto_stop !== false,
         maxRounds: d.max_rounds || 10,
-        activeCount: d.active_count || 0,
-        totalCount: d.total_count || 0,
       }
       if (d.members && typeof d.members === 'object') {
         members.value = Object.entries(d.members).map(([name, info]: [string, any]) => ({
@@ -556,16 +599,37 @@ async function loadStatus() {
 
 async function loadHistory() {
   try {
-    const r = await axios.get('/api/studio/history')
+    const r = await axios.get('/api/studio/history', {
+      params: { support_all_history: 'true' },
+    })
     if (r.data.status === 'ok') {
       const data = r.data.data
-      if (data && typeof data === 'object') {
-        const all = Object.values(data) as Conv[]
-        const active = all.filter(c => c.turns?.length > 0).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
-        const prevTurns = activeConv.value?.turns.length ?? 0
-        activeConv.value = active[0] || null
-        if (activeConv.value && activeConv.value.turns.length > prevTurns) scrollToBottom()
+      const prevLen = allTurns.value.length
+
+      if (data && data.all_turns) {
+        // New format: flat all_turns
+        allTurns.value = data.all_turns
+        activeTaskId.value = data.active_task_id || ''
+        convStatus.value = data.active_session_status || 'idle'
+      } else if (data && typeof data === 'object' && !data.all_turns) {
+        // Fallback: old format (conversations dict)
+        const all = Object.values(data) as any[]
+        const withTurns = all.filter(c => c.turns?.length > 0).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
+        if (withTurns.length > 0) {
+          const turns: Turn[] = []
+          for (const conv of withTurns) {
+            for (const t of conv.turns) {
+              turns.push({ ...t, task_id: t.task_id || '' })
+            }
+          }
+          allTurns.value = turns
+          const active = withTurns.find((c: any) => c.status === 'active')
+          convStatus.value = active ? 'active' : 'idle'
+          activeTaskId.value = active?.current_task_id || ''
+        }
       }
+
+      if (allTurns.value.length > prevLen) scrollToBottom()
     }
   } catch (e: any) {
     console.warn('history poll error:', e?.message)
@@ -582,6 +646,7 @@ async function sendChat() {
     if (r.data.status === 'ok') {
       chatInput.value = ''
       toast('协作已启动')
+      // Don't clear history — just reload to get new task
       await loadHistory()
     } else {
       toast(r.data.message || '发送失败', 'error')
@@ -607,7 +672,13 @@ async function addMember() {
 async function resetConversation() {
   try {
     const r = await axios.post('/api/studio/reset')
-    if (r.data.status === 'ok') { toast('已重置'); activeConv.value = null; await loadAll() }
+    if (r.data.status === 'ok') {
+      toast('已重置')
+      allTurns.value = []
+      activeTaskId.value = ''
+      convStatus.value = 'idle'
+      await loadAll()
+    }
   } catch (e: any) { toast('重置失败', 'error') }
 }
 
@@ -651,15 +722,13 @@ onUnmounted(() => stopPoll())
 .chat-messages::-webkit-scrollbar { width: 5px; }
 .chat-messages::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 5px; }
 
-/* Chat row animation */
-.chat-row { animation: fadeIn 0.25s ease; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+/* Timeline overrides for compact look */
+.chat-messages :deep(.v-timeline) { padding-top: 0; }
+.chat-messages :deep(.v-timeline-item__body) { padding-inline-start: 12px; }
+.chat-messages :deep(.v-timeline-item) { padding-bottom: 8px; }
 
-/* Avatar alignment */
-.chat-avatar { margin-top: 4px; }
-
-/* Bubble area width */
-.bubble-area { max-width: 78%; }
+/* Task header */
+.task-header-item { margin-bottom: 4px; }
 
 /* Chat bubble base */
 .chat-bubble {
@@ -677,7 +746,6 @@ onUnmounted(() => stopPoll())
 .chat-bubble:hover { filter: brightness(0.97); }
 
 .left-bubble { border-top-left-radius: 4px; }
-.right-bubble { border-top-right-radius: 4px; }
 
 /* Response text — scrollable when long */
 .response-text { max-height: 300px; overflow-y: auto; }
@@ -692,13 +760,18 @@ onUnmounted(() => stopPoll())
 }
 
 /* Centered delegation pill */
-.delegation-center { animation: fadeIn 0.25s ease; }
 .delegation-pill { background: rgba(var(--v-theme-primary), 0.06); border: 1px solid rgba(var(--v-theme-primary), 0.12); }
 
 /* Live indicator dot */
 .live-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: #4caf50; display: inline-block;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+.live-dot-sm {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #4caf50; display: inline-block;
+  margin-right: 4px;
   animation: pulse 1.5s ease-in-out infinite;
 }
 @keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.4; transform:scale(1.4); } }

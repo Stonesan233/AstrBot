@@ -139,13 +139,19 @@ class StudioRoute(Route):
                 return jsonify(Response().ok(data={}).__dict__)
 
             conversations = getattr(plugin, "conversations", {})
+            support_all = request.args.get("support_all_history", "false").lower() == "true"
 
             # 序列化所有会话
             history = {}
+            all_turns = []
+            active_task_id = ""
+            active_session_status = "idle"
+
             for sid, conv in conversations.items():
                 turns = []
                 for t in conv.get("turns", []):
-                    turns.append({
+                    turn_data = {
+                        "task_id": t.get("task_id", ""),
                         "from_member": t.get("from_member", ""),
                         "to_member": t.get("to_member", ""),
                         "message": t.get("message", ""),
@@ -153,7 +159,11 @@ class StudioRoute(Route):
                         "delegated_to": t.get("delegated_to"),
                         "auto_delegated": bool(t.get("auto_delegated", False)),
                         "timestamp": t.get("timestamp", 0),
-                    })
+                    }
+                    turns.append(turn_data)
+                    if support_all:
+                        all_turns.append({**turn_data, "session_id": sid})
+
                 history[sid] = {
                     "id": conv.get("id", sid),
                     "turns": turns,
@@ -166,8 +176,24 @@ class StudioRoute(Route):
                     "last_review_by": conv.get("last_review_by"),
                     "last_action_type": conv.get("last_action_type"),
                     "auto_delegate_count": conv.get("auto_delegate_count", 0),
+                    "current_task_id": conv.get("current_task_id", ""),
                 }
-            return jsonify(Response().ok(data=history).__dict__)
+
+                if conv.get("status") == "active":
+                    active_task_id = conv.get("current_task_id", "")
+                    active_session_status = "active"
+
+            result_data = history
+            if support_all:
+                all_turns.sort(key=lambda x: x.get("timestamp", 0))
+                result_data = {
+                    "conversations": history,
+                    "all_turns": all_turns,
+                    "active_task_id": active_task_id,
+                    "active_session_status": active_session_status,
+                }
+
+            return jsonify(Response().ok(data=result_data).__dict__)
         except Exception as e:
             logger.error(traceback.format_exc())
             return jsonify(Response().error(f"获取 Studio 历史失败: {e!s}").__dict__)
