@@ -274,22 +274,65 @@
     </v-row>
 
     <!-- Add Member Dialog -->
-    <v-dialog v-model="showAddMember" max-width="500">
+    <v-dialog v-model="showAddMember" max-width="560">
       <v-card class="rounded-lg">
         <v-card-title class="d-flex align-center justify-space-between py-4 px-6">
           <span class="text-h6">添加成员</span>
           <v-btn icon="mdi-close" variant="text" @click="showAddMember = false" />
         </v-card-title>
         <v-divider />
-        <v-card-text class="pa-6">
+
+        <!-- Tab: SubAgent bind / Manual -->
+        <v-tabs v-model="addMemberTab" density="compact" class="px-4">
+          <v-tab value="subagent">绑定 SubAgent</v-tab>
+          <v-tab value="manual">手动添加</v-tab>
+        </v-tabs>
+        <v-divider />
+
+        <!-- SubAgent bind tab -->
+        <v-card-text v-if="addMemberTab === 'subagent'" class="pa-4">
+          <div v-if="loadingSubagents" class="text-center py-4">
+            <v-progress-circular indeterminate size="24" color="primary" />
+            <div class="text-caption text-medium-emphasis mt-2">加载 SubAgent 列表...</div>
+          </div>
+          <div v-else-if="availableSubagents.length === 0" class="text-center py-6 text-medium-emphasis">
+            <v-icon icon="mdi-robot-outline" size="40" class="mb-2 opacity-40" />
+            <div class="text-body-2">暂无可用 SubAgent</div>
+            <div class="text-caption mt-1">请先在 SubAgent 管理页创建 SubAgent</div>
+          </div>
+          <div v-else>
+            <div
+              v-for="sa in availableSubagents"
+              :key="sa.name"
+              class="d-flex align-center pa-3 mb-2 rounded-lg border-thin cursor-pointer"
+              :class="{ 'bg-primary-lighten-5': isBound(sa.name) }"
+              style="cursor: pointer"
+              @click="bindSubAgent(sa)"
+            >
+              <v-avatar :color="getMemberColor(sa.name)" size="36" class="mr-3 flex-shrink-0">
+                <span class="text-white font-weight-bold">{{ sa.name[0] }}</span>
+              </v-avatar>
+              <div class="flex-grow-1 overflow-hidden">
+                <div class="text-body-2 font-weight-medium">{{ sa.name }}</div>
+                <div class="text-caption text-medium-emphasis text-truncate">{{ sa.public_description || '无描述' }}</div>
+              </div>
+              <v-chip v-if="isBound(sa.name)" size="x-small" variant="tonal" color="success" class="ml-2">已绑定</v-chip>
+              <v-btn v-else size="x-small" variant="tonal" color="primary" :loading="addingMember" @click.stop="bindSubAgent(sa)">绑定</v-btn>
+            </div>
+          </div>
+        </v-card-text>
+
+        <!-- Manual add tab -->
+        <v-card-text v-if="addMemberTab === 'manual'" class="pa-6">
           <v-text-field v-model="newMember.name" label="名称" variant="outlined" density="comfortable" prepend-inner-icon="mdi-account" class="mb-4" />
           <v-textarea v-model="newMember.persona" label="人格提示词" variant="outlined" density="comfortable" auto-grow rows="3" prepend-inner-icon="mdi-text" placeholder="专业能力和风格..." />
         </v-card-text>
+
         <v-divider />
         <v-card-actions class="pa-4">
           <v-spacer />
-          <v-btn variant="text" @click="showAddMember = false">取消</v-btn>
-          <v-btn variant="flat" color="primary" :loading="addingMember" @click="addMember">添加</v-btn>
+          <v-btn variant="text" @click="showAddMember = false">关闭</v-btn>
+          <v-btn v-if="addMemberTab === 'manual'" variant="flat" color="primary" :loading="addingMember" @click="addMember">添加</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -365,6 +408,10 @@ const convStatus = ref('idle')
 const chatInput = ref('')
 const chatTarget = ref('')
 const sendingChat = ref(false)
+
+const addMemberTab = ref('subagent')
+const availableSubagents = ref<{ name: string; persona_id: string; public_description: string; provider_id: string | null }[]>([])
+const loadingSubagents = ref(false)
 
 const newMember = ref({ name: '', persona: '' })
 
@@ -669,6 +716,40 @@ async function addMember() {
   finally { addingMember.value = false }
 }
 
+async function loadSubagents() {
+  loadingSubagents.value = true
+  try {
+    const r = await axios.get('/api/studio/subagents')
+    if (r.data.status === 'ok') {
+      availableSubagents.value = r.data.data || []
+    }
+  } catch (e: any) {
+    console.warn('loadSubagents error:', e?.message)
+  } finally {
+    loadingSubagents.value = false
+  }
+}
+
+function isBound(name: string): boolean {
+  return members.value.some(m => m.name === name)
+}
+
+async function bindSubAgent(sa: { name: string; public_description: string }) {
+  if (isBound(sa.name)) { toast('该 SubAgent 已绑定', 'warning'); return }
+  addingMember.value = true
+  try {
+    const r = await axios.post('/api/studio/member', {
+      name: sa.name,
+      persona_prompt: sa.public_description || `SubAgent: ${sa.name}`,
+      subagent_name: sa.name,
+      public_description: sa.public_description,
+    })
+    if (r.data.status === 'ok') { toast(`已绑定 ${sa.name}`); await loadAll() }
+    else toast(r.data.message || '绑定失败', 'error')
+  } catch (e: any) { toast(e?.response?.data?.message || '绑定失败', 'error') }
+  finally { addingMember.value = false }
+}
+
 async function resetConversation() {
   try {
     const r = await axios.post('/api/studio/reset')
@@ -693,6 +774,7 @@ async function loadAll() {
 // ---------------------------------------------------------------------------
 
 watch(autoRefresh, v => v ? startPoll() : stopPoll())
+watch(showAddMember, v => { if (v) loadSubagents() })
 
 function startPoll() {
   stopPoll()

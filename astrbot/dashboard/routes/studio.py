@@ -47,6 +47,7 @@ class StudioRoute(Route):
             ("/studio/chat", ("POST", self.send_chat)),
             ("/studio/member", ("POST", self.add_member)),
             ("/studio/member", ("DELETE", self.remove_member)),
+            ("/studio/subagents", ("GET", self.list_subagents)),
             ("/studio/reset", ("POST", self.reset_conversation)),
         ]
         self.register_routes()
@@ -264,12 +265,26 @@ class StudioRoute(Route):
 
             name = (data.get("name") or "").strip()
             persona = (data.get("persona_prompt") or "").strip()
+            subagent_name = (data.get("subagent_name") or "").strip()
+            description = (data.get("public_description") or "").strip()
+
             if not name:
                 return jsonify(Response().error("成员名称不能为空").__dict__)
-            if not persona:
-                return jsonify(Response().error("人格提示词不能为空").__dict__)
 
-            result = plugin._handle_add(f"{name} {persona}")
+            if subagent_name:
+                # 绑定 SubAgent 模式
+                result = plugin._handle_bind_subagent(
+                    name=name,
+                    persona_prompt=persona,
+                    subagent_name=subagent_name,
+                    description=description,
+                )
+            else:
+                # 手动添加模式
+                if not persona:
+                    return jsonify(Response().error("人格提示词不能为空").__dict__)
+                result = plugin._handle_add(f"{name} {persona}")
+
             if "已添加" in result:
                 return jsonify(Response().ok(message=result).__dict__)
             else:
@@ -277,6 +292,35 @@ class StudioRoute(Route):
         except Exception as e:
             logger.error(traceback.format_exc())
             return jsonify(Response().error(f"添加成员失败: {e!s}").__dict__)
+
+    # ------------------------------------------------------------------
+    # GET /api/studio/subagents
+    # ------------------------------------------------------------------
+
+    async def list_subagents(self):
+        """列出 AstrBot 当前配置的所有 SubAgent"""
+        try:
+            cfg = self.core_lifecycle.astrbot_config
+            orch_cfg = cfg.get("subagent_orchestrator", {})
+            agents = orch_cfg.get("agents", []) if isinstance(orch_cfg, dict) else []
+
+            subagents = []
+            for a in agents:
+                if not isinstance(a, dict):
+                    continue
+                if not a.get("enabled", True):
+                    continue
+                subagents.append({
+                    "name": a.get("name", ""),
+                    "persona_id": a.get("persona_id", ""),
+                    "public_description": a.get("public_description", ""),
+                    "provider_id": a.get("provider_id"),
+                })
+
+            return jsonify(Response().ok(data=subagents).__dict__)
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            return jsonify(Response().error(f"获取 SubAgent 列表失败: {e!s}").__dict__)
 
     # ------------------------------------------------------------------
     # DELETE /api/studio/member
