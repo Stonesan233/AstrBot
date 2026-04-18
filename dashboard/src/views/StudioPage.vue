@@ -57,11 +57,11 @@
         </v-card>
       </v-col>
 
-      <!-- ====== Center: Chat Timeline ====== -->
+      <!-- ====== Center: Chat Room ====== -->
       <v-col cols="12" md="6">
-        <v-card class="rounded-lg border-thin" variant="flat" border>
-          <!-- Title -->
-          <v-card-title class="d-flex align-center justify-space-between py-3 px-4">
+        <v-card class="chat-card rounded-lg border-thin d-flex flex-column" variant="flat" border>
+          <!-- Title bar -->
+          <v-card-title class="d-flex align-center justify-space-between py-3 px-4 flex-shrink-0">
             <div class="d-flex align-center ga-2">
               <v-icon icon="mdi-forum-outline" size="small" color="primary" />
               <span class="text-subtitle-2 font-weight-bold">协作记录</span>
@@ -77,85 +77,86 @@
           </v-card-title>
           <v-divider />
 
-          <!-- Messages area -->
-          <div class="chat-log pa-4" ref="chatLogRef">
-            <div v-if="loading && !activeConv" class="pa-4"><v-skeleton-loader type="card@2" /></div>
+          <!-- Chat messages area -->
+          <div class="chat-messages flex-grow-1" ref="chatLogRef">
+            <!-- Loading skeleton -->
+            <div v-if="loading && chatMessages.length === 0" class="pa-4">
+              <v-skeleton-loader type="card@3" />
+            </div>
 
-            <div v-else-if="!activeConv || turns.length === 0" class="text-center py-12 text-medium-emphasis">
+            <!-- Empty state -->
+            <div v-else-if="chatMessages.length === 0" class="d-flex flex-column align-center justify-center fill-height text-medium-emphasis">
               <v-icon icon="mdi-chat-processing-outline" size="56" class="mb-3 opacity-20" />
               <div class="text-body-2">暂无协作记录</div>
               <div class="text-caption mt-1">在下方输入任务启动协作</div>
             </div>
 
-            <v-timeline v-else side="end" density="compact" align="start">
-              <v-timeline-item
-                v-for="(turn, idx) in turns"
-                :key="turn.timestamp + '-' + idx"
-                :dot-color="getMemberColor(turn.to_member)"
-                size="small"
-                class="turn-item"
-              >
-                <template #icon>
-                  <v-icon :icon="turn.auto_delegated ? 'mdi-auto-fix' : 'mdi-circle-small'" :color="turn.auto_delegated ? 'orange' : undefined" size="small" />
-                </template>
+            <!-- Messages list -->
+            <div v-else class="pa-4">
+              <template v-for="msg in chatMessages" :key="msg.id">
+                <!-- Delegation indicator (centered) -->
+                <div v-if="msg.type === 'system'" class="delegation-center d-flex align-center justify-center my-3">
+                  <div class="d-flex align-center ga-1 px-3 py-1 rounded-pill delegation-pill">
+                    <v-chip size="x-small" :color="getMemberColor(msg.sender)" variant="tonal" label>{{ msg.sender }}</v-chip>
+                    <v-icon :icon="msg.autoDelegated ? 'mdi-swap-horizontal-bold' : 'mdi-arrow-right'" size="small" :color="msg.autoDelegated ? 'orange' : 'primary'" />
+                    <v-chip size="x-small" :color="getMemberColor(msg.delegateTo || '')" variant="tonal" label>{{ msg.delegateTo }}</v-chip>
+                    <v-chip v-if="msg.autoDelegated" size="x-small" variant="tonal" color="orange" label class="ml-1">自动</v-chip>
+                  </div>
+                </div>
 
-                <!-- Header line -->
-                <div class="d-flex align-center ga-2 mb-1">
-                  <v-avatar :color="getMemberColor(turn.to_member)" size="22">
-                    <span class="text-white font-weight-bold" style="font-size:10px">{{ turn.to_member[0] }}</span>
+                <!-- Chat bubble row -->
+                <div v-else class="chat-row d-flex mb-3" :class="[msg.side === 'right' ? 'flex-row-reverse' : '']">
+                  <!-- Avatar -->
+                  <v-avatar :color="getMemberColor(msg.sender)" size="30" class="chat-avatar flex-shrink-0 mt-5">
+                    <span class="text-white font-weight-bold" style="font-size:11px">{{ msg.sender[0] }}</span>
                   </v-avatar>
-                  <span class="text-body-2 font-weight-bold" :style="{ color: memberTextColor(turn.to_member) }">{{ turn.to_member }}</span>
-                  <v-chip v-if="turn.auto_delegated" size="x-small" variant="tonal" color="orange" label>自动</v-chip>
-                  <span class="text-caption text-medium-emphasis ml-auto">R{{ idx + 1 }}</span>
-                  <span class="text-caption text-medium-emphasis">{{ formatTime(turn.timestamp) }}</span>
-                </div>
 
-                <!-- Task -->
-                <div class="msg-bubble task-bubble pa-3 rounded-lg mb-2">
-                  <div class="d-flex align-center ga-1 mb-1">
-                    <v-icon icon="mdi-clipboard-text" size="x-small" color="primary" />
-                    <span class="text-caption font-weight-bold text-primary">任务</span>
-                    <span class="text-caption text-medium-emphasis ml-auto">from {{ turn.from_member }}</span>
-                  </div>
-                  <div class="text-body-2">{{ turn.message }}</div>
-                </div>
+                  <!-- Bubble area -->
+                  <div class="bubble-area" :class="[msg.side === 'right' ? 'mr-2 text-right' : 'ml-2 text-left']">
+                    <!-- Meta: name + time -->
+                    <div class="chat-meta d-flex mb-1" :style="{ justifyContent: msg.side === 'right' ? 'flex-end' : 'flex-start' }">
+                      <span class="chat-name font-weight-bold" :style="{ color: memberTextColor(msg.sender), fontSize: '0.8rem' }">{{ msg.sender }}</span>
+                      <span class="chat-time text-medium-emphasis mx-2">{{ formatTime(msg.time) }}</span>
+                    </div>
 
-                <!-- Response -->
-                <div class="msg-bubble pa-3 rounded-lg mb-2">
-                  <div class="d-flex align-center ga-1 mb-1">
-                    <v-icon icon="mdi-robot-outline" size="x-small" color="medium-emphasis" />
-                    <span class="text-caption font-weight-bold text-medium-emphasis">回复</span>
-                    <v-spacer />
-                    <v-btn icon="mdi-content-copy" variant="text" size="x-small" color="grey" @click="copyText(turn.response)">
-                      <v-tooltip activator="parent" location="top">复制</v-tooltip>
-                    </v-btn>
-                  </div>
-                  <div class="response-text">
-                    <template v-if="hasCode(turn.response)">
-                      <template v-for="(seg, si) in parseCode(turn.response)" :key="si">
-                        <pre v-if="seg.type === 'code'" class="code-block rounded pa-2 mb-1"><code>{{ seg.content }}</code></pre>
-                        <span v-else>{{ seg.content }}</span>
-                      </template>
-                    </template>
-                    <template v-else>{{ turn.response }}</template>
-                  </div>
-                </div>
+                    <!-- Bubble -->
+                    <div class="chat-bubble" :class="[msg.side === 'right' ? 'right-bubble' : 'left-bubble']" :style="bubbleStyle(msg)">
+                      <!-- Task header with delegation arrow -->
+                      <div v-if="msg.type === 'task' && msg.delegateTo" class="task-header d-flex align-center ga-1 mb-2 pb-1" style="border-bottom: 1px dashed rgba(0,0,0,0.1)">
+                        <v-icon icon="mdi-clipboard-text-outline" size="14" :color="getMemberColor(msg.sender)" />
+                        <span class="text-caption font-weight-bold">任务</span>
+                        <v-icon icon="mdi-arrow-right" size="14" color="primary" />
+                        <v-chip size="x-small" :color="getMemberColor(msg.delegateTo)" variant="tonal" label>{{ msg.delegateTo }}</v-chip>
+                      </div>
 
-                <!-- Delegation arrow -->
-                <div v-if="turn.delegated_to" class="delegation-arrow d-flex align-center ga-2 mt-1 pa-2 rounded-lg">
-                  <v-icon :icon="turn.auto_delegated ? 'mdi-swap-horizontal-bold' : 'mdi-arrow-right-bold-circle'" size="small" :color="turn.auto_delegated ? 'orange' : 'primary'" />
-                  <v-chip size="x-small" :color="getMemberColor(turn.to_member)" variant="tonal">{{ turn.to_member }}</v-chip>
-                  <v-icon icon="mdi-arrow-right" size="x-small" color="primary" />
-                  <v-chip size="x-small" :color="getMemberColor(turn.delegated_to)" variant="tonal">{{ turn.delegated_to }}</v-chip>
-                  <span v-if="turn.auto_delegated" class="text-caption text-orange font-weight-bold">自动委托</span>
+                      <!-- Content -->
+                      <div v-if="msg.type === 'response'" class="response-text">
+                        <template v-if="hasCode(msg.content)">
+                          <template v-for="(seg, si) in parseCode(msg.content)" :key="si">
+                            <pre v-if="seg.type === 'code'" class="code-block rounded pa-2 mb-1"><code>{{ seg.content }}</code></pre>
+                            <span v-else style="white-space:pre-wrap">{{ seg.content }}</span>
+                          </template>
+                        </template>
+                        <template v-else>{{ msg.content }}</template>
+                      </div>
+                      <div v-else class="msg-text">{{ msg.content }}</div>
+
+                      <!-- Copy button for responses -->
+                      <div v-if="msg.type === 'response'" class="d-flex mt-1" :style="{ justifyContent: msg.side === 'right' ? 'flex-start' : 'flex-end' }">
+                        <v-btn icon="mdi-content-copy" variant="text" size="x-small" color="grey" density="compact" @click="copyText(msg.content)">
+                          <v-tooltip activator="parent" location="bottom">复制</v-tooltip>
+                        </v-btn>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </v-timeline-item>
-            </v-timeline>
+              </template>
+            </div>
           </div>
 
           <!-- Input bar -->
           <v-divider />
-          <div class="pa-3">
+          <div class="pa-3 flex-shrink-0">
             <div class="d-flex align-center ga-2">
               <v-chip v-if="chatTarget" size="small" :color="getMemberColor(chatTarget)" variant="tonal" closable @click:close="chatTarget = ''">
                 @{{ chatTarget }}
@@ -316,6 +317,17 @@ type Conv = {
   auto_delegate_count: number
 }
 
+type ChatMsg = {
+  id: string
+  sender: string
+  content: string
+  time: number
+  type: 'task' | 'response' | 'system'
+  delegateTo?: string
+  autoDelegated?: boolean
+  side: 'left' | 'right'
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -352,13 +364,13 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 // Derived
 // ---------------------------------------------------------------------------
 
-const turns = computed(() => activeConv.value?.turns ?? [])
 const isConvActive = computed(() => activeConv.value?.status === 'active')
 
 const convStatusColor = computed(() => {
   const m: Record<string, string> = { active: 'info', completed: 'success', timeout: 'warning', error: 'error', idle: 'grey' }
   return m[activeConv.value?.status ?? ''] ?? 'grey'
 })
+
 const convStatusLabel = computed(() => {
   const m: Record<string, string> = { active: '进行中', completed: '已完成', timeout: '超时', error: '错误', idle: '空闲' }
   return m[activeConv.value?.status ?? ''] ?? ''
@@ -368,6 +380,7 @@ const progressPct = computed(() => {
   if (!activeConv.value) return 0
   return Math.min((activeConv.value.turns.length / activeConv.value.max_rounds) * 100, 100)
 })
+
 const progressClr = computed(() => {
   if (!activeConv.value) return 'primary'
   const r = activeConv.value.turns.length / activeConv.value.max_rounds
@@ -375,27 +388,103 @@ const progressClr = computed(() => {
 })
 
 // ---------------------------------------------------------------------------
+// Flatten turns → chat messages
+// ---------------------------------------------------------------------------
+
+const chatMessages = computed<ChatMsg[]>(() => {
+  if (!activeConv.value) return []
+  const msgs: ChatMsg[] = []
+  activeConv.value.turns.forEach((turn, i) => {
+    // 1) Task message (from_member → to_member)
+    msgs.push({
+      id: `t${i}-task`,
+      sender: turn.from_member,
+      content: turn.message,
+      time: turn.timestamp,
+      type: 'task',
+      delegateTo: turn.to_member,
+      side: getMemberSide(turn.from_member),
+    })
+    // 2) Response message (to_member replies)
+    msgs.push({
+      id: `t${i}-resp`,
+      sender: turn.to_member,
+      content: turn.response,
+      time: turn.timestamp,
+      type: 'response',
+      side: getMemberSide(turn.to_member),
+    })
+    // 3) Delegation indicator (if delegated further)
+    if (turn.delegated_to) {
+      msgs.push({
+        id: `t${i}-del`,
+        sender: turn.to_member,
+        content: '',
+        time: turn.timestamp,
+        type: 'system',
+        delegateTo: turn.delegated_to,
+        autoDelegated: turn.auto_delegated,
+        side: getMemberSide(turn.to_member),
+      })
+    }
+  })
+  return msgs
+})
+
+// ---------------------------------------------------------------------------
 // Member colors — deterministic per name
 // ---------------------------------------------------------------------------
 
 const _cm: Record<string, string> = {}
-// Named members get fixed colors; others cycle palette
 const _named: Record<string, string> = { '露娜': 'deep-purple', '露娜大人': 'deep-purple', '朝日': 'pink', '朝日娘': 'pink' }
 const _palette = ['deep-purple', 'blue', 'teal', 'indigo', 'cyan', 'pink', 'orange', 'green', 'brown', 'blue-grey']
 
 function getMemberColor(name: string): string {
+  if (!name) return 'grey'
   if (_cm[name]) return _cm[name]
   _cm[name] = _named[name] ?? _palette[Object.keys(_cm).length % _palette.length]
   return _cm[name]
 }
 
+const _textColorMap: Record<string, string> = {
+  'deep-purple': '#5e35b1', blue: '#1565c0', teal: '#00897b', indigo: '#3949ab',
+  cyan: '#0097a7', pink: '#d81b60', orange: '#ef6c00', green: '#2e7d32',
+  brown: '#6d4c41', 'blue-grey': '#455a64', grey: '#757575',
+}
+
 function memberTextColor(name: string): string {
-  const map: Record<string, string> = {
-    'deep-purple': '#5e35b1', blue: '#1565c0', teal: '#00897b', indigo: '#3949ab',
-    cyan: '#0097a7', pink: '#d81b60', orange: '#ef6c00', green: '#2e7d32',
-    brown: '#6d4c41', 'blue-grey': '#455a64',
+  return _textColorMap[getMemberColor(name)] ?? '#333'
+}
+
+// ---------------------------------------------------------------------------
+// Member side (left / right) — deterministic
+// ---------------------------------------------------------------------------
+
+const _namedSide: Record<string, 'left' | 'right'> = {
+  '露娜': 'right', '露娜大人': 'right',
+  '朝日': 'left', '朝日娘': 'left',
+}
+
+function getMemberSide(name: string): 'left' | 'right' {
+  if (_namedSide[name]) return _namedSide[name]
+  const idx = members.value.findIndex(m => m.name === name)
+  if (idx >= 0) return idx % 2 === 0 ? 'left' : 'right'
+  // Fallback: hash-based
+  let h = 0
+  for (const c of name) h = ((h << 5) - h + c.charCodeAt(0)) | 0
+  return h % 2 === 0 ? 'left' : 'right'
+}
+
+// ---------------------------------------------------------------------------
+// Bubble style per message
+// ---------------------------------------------------------------------------
+
+function bubbleStyle(msg: ChatMsg) {
+  const c = memberTextColor(msg.sender)
+  if (msg.side === 'right') {
+    return { background: c + '15', borderRight: `3px solid ${c}60` }
   }
-  return map[getMemberColor(name)] ?? '#333'
+  return { background: c + '08', borderLeft: `3px solid ${c}50` }
 }
 
 // ---------------------------------------------------------------------------
@@ -473,9 +562,9 @@ async function loadHistory() {
       if (data && typeof data === 'object') {
         const all = Object.values(data) as Conv[]
         const active = all.filter(c => c.turns?.length > 0).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
-        const prev = activeConv.value?.turns.length ?? 0
+        const prevTurns = activeConv.value?.turns.length ?? 0
         activeConv.value = active[0] || null
-        if (activeConv.value && activeConv.value.turns.length > prev) scrollToBottom()
+        if (activeConv.value && activeConv.value.turns.length > prevTurns) scrollToBottom()
       }
     }
   } catch (e: any) {
@@ -524,12 +613,12 @@ async function resetConversation() {
 
 async function loadAll() {
   loading.value = true
-  try { await Promise.all([loadStatus(), loadHistory()]) }
+  try { await Promise.all([loadStatus(), loadHistory()]); scrollToBottom() }
   finally { loading.value = false }
 }
 
 // ---------------------------------------------------------------------------
-// Polling
+// Polling — 2s auto-refresh
 // ---------------------------------------------------------------------------
 
 watch(autoRefresh, v => v ? startPoll() : stopPoll())
@@ -554,35 +643,59 @@ onUnmounted(() => stopPoll())
 <style scoped>
 .studio-page { padding: 24px; max-width: 1600px; margin: 0 auto; }
 
-.chat-log { height: 520px; overflow-y: auto; scroll-behavior: smooth; }
-.chat-log::-webkit-scrollbar { width: 5px; }
-.chat-log::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 5px; }
+/* Chat card — fills viewport height */
+.chat-card { height: calc(100vh - 180px); min-height: 500px; }
 
-.turn-item { animation: fadeIn 0.25s ease; }
+/* Scrollable message area */
+.chat-messages { overflow-y: auto; scroll-behavior: smooth; }
+.chat-messages::-webkit-scrollbar { width: 5px; }
+.chat-messages::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 5px; }
+
+/* Chat row animation */
+.chat-row { animation: fadeIn 0.25s ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
-.msg-bubble { background: rgba(var(--v-theme-on-surface), 0.025); border: 1px solid rgba(0,0,0,0.06); }
-.task-bubble { border-left: 3px solid rgb(var(--v-theme-primary)) !important; }
+/* Avatar alignment */
+.chat-avatar { margin-top: 4px; }
 
-.response-text {
-  white-space: pre-wrap; word-break: break-word;
-  max-height: 250px; overflow-y: auto;
-  font-size: 0.85rem; line-height: 1.55;
+/* Bubble area width */
+.bubble-area { max-width: 78%; }
+
+/* Chat bubble base */
+.chat-bubble {
+  padding: 10px 14px;
+  border-radius: 12px;
+  word-break: break-word;
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-size: 0.85rem;
+  display: inline-block;
+  text-align: left;
+  max-width: 100%;
+  transition: background 0.15s;
 }
+.chat-bubble:hover { filter: brightness(0.97); }
+
+.left-bubble { border-top-left-radius: 4px; }
+.right-bubble { border-top-right-radius: 4px; }
+
+/* Response text — scrollable when long */
+.response-text { max-height: 300px; overflow-y: auto; }
 .response-text::-webkit-scrollbar { width: 3px; }
 .response-text::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.08); border-radius: 3px; }
 
+/* Code blocks */
 .code-block {
   background: #1e1e1e; color: #d4d4d4;
   font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
   font-size: 0.8rem; line-height: 1.4; overflow-x: auto;
 }
 
-.delegation-arrow {
-  background: linear-gradient(90deg, rgba(var(--v-theme-primary),0.08), transparent);
-  border-left: 3px solid rgb(var(--v-theme-primary));
-}
+/* Centered delegation pill */
+.delegation-center { animation: fadeIn 0.25s ease; }
+.delegation-pill { background: rgba(var(--v-theme-primary), 0.06); border: 1px solid rgba(var(--v-theme-primary), 0.12); }
 
+/* Live indicator dot */
 .live-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: #4caf50; display: inline-block;
