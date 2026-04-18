@@ -107,7 +107,7 @@
                     </template>
                     <div class="d-flex align-center ga-2 my-1">
                       <v-chip size="x-small" variant="tonal" color="primary" label>
-                        任务 #{{ msg.taskIndex + 1 }}
+                        任务 #{{ (msg.taskIndex ?? 0) + 1 }}
                       </v-chip>
                       <span class="text-caption text-medium-emphasis">{{ formatTime(msg.time) }}</span>
                       <v-chip v-if="msg.isActive" size="x-small" variant="tonal" color="info" label>
