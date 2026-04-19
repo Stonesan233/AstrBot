@@ -112,6 +112,8 @@ class StudioRoute(Route):
                         "emoji": info.get("emoji", "🤖"),
                         "persona_prompt": info.get("persona_prompt", ""),
                         "created_at": info.get("created_at", 0),
+                        "bound_subagent": info.get("bound_subagent", ""),
+                        "provider_id": info.get("provider_id", ""),
                     }
                     for name, info in members.items()
                 },

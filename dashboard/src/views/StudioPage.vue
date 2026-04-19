@@ -43,8 +43,20 @@
                   <span class="text-white text-body-2 font-weight-bold">{{ m.name[0] }}</span>
                 </v-avatar>
               </template>
-              <v-list-item-title class="text-body-2 font-weight-medium">{{ m.name }}</v-list-item-title>
-              <v-list-item-subtitle class="text-caption text-medium-emphasis text-truncate">{{ truncate(m.persona_prompt, 28) }}</v-list-item-subtitle>
+              <v-list-item-title class="text-body-2 font-weight-medium">
+                {{ m.name }}
+                <v-chip v-if="m.bound_subagent" size="x-small" variant="tonal" color="deep-purple" label class="ml-1">
+                  SubAgent: {{ m.bound_subagent }}
+                </v-chip>
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption text-medium-emphasis text-truncate">
+                <template v-if="m.bound_subagent && m.provider_id">
+                  <v-icon icon="mdi-server" size="x-small" class="mr-1" />{{ m.provider_id }}
+                </template>
+                <template v-else>
+                  {{ truncate(m.persona_prompt, 28) }}
+                </template>
+              </v-list-item-subtitle>
               <template #append>
                 <v-icon icon="mdi-at" size="x-small" color="primary" />
               </template>
@@ -315,6 +327,9 @@
               <div class="flex-grow-1 overflow-hidden">
                 <div class="text-body-2 font-weight-medium">{{ sa.name }}</div>
                 <div class="text-caption text-medium-emphasis text-truncate">{{ sa.public_description || '无描述' }}</div>
+                <div v-if="sa.provider_id" class="text-caption text-info mt-1">
+                  <v-icon icon="mdi-server" size="x-small" class="mr-1" />{{ sa.provider_id }}
+                </div>
               </div>
               <v-chip v-if="isBound(sa.name)" size="x-small" variant="tonal" color="success" class="ml-2">已绑定</v-chip>
               <v-btn v-else size="x-small" variant="tonal" color="primary" :loading="addingMember" @click.stop="bindSubAgent(sa)">绑定</v-btn>
@@ -398,7 +413,7 @@ const status = ref({
   maxRounds: 10,
 })
 
-const members = ref<{ name: string; persona_prompt: string }[]>([])
+const members = ref<{ name: string; persona_prompt: string; bound_subagent: string; provider_id: string }[]>([])
 
 // All-history data
 const allTurns = ref<Turn[]>([])
@@ -634,7 +649,10 @@ async function loadStatus() {
       }
       if (d.members && typeof d.members === 'object') {
         members.value = Object.entries(d.members).map(([name, info]: [string, any]) => ({
-          name, persona_prompt: info.persona_prompt || '',
+          name,
+          persona_prompt: info.persona_prompt || '',
+          bound_subagent: info.bound_subagent || '',
+          provider_id: info.provider_id || '',
         }))
       }
       apiError.value = ''
@@ -734,7 +752,7 @@ function isBound(name: string): boolean {
   return members.value.some(m => m.name === name)
 }
 
-async function bindSubAgent(sa: { name: string; public_description: string }) {
+async function bindSubAgent(sa: { name: string; public_description: string; provider_id?: string | null }) {
   if (isBound(sa.name)) { toast('该 SubAgent 已绑定', 'warning'); return }
   addingMember.value = true
   try {
@@ -744,7 +762,11 @@ async function bindSubAgent(sa: { name: string; public_description: string }) {
       subagent_name: sa.name,
       public_description: sa.public_description,
     })
-    if (r.data.status === 'ok') { toast(`已绑定 ${sa.name}`); await loadAll() }
+    if (r.data.status === 'ok') {
+      const provInfo = sa.provider_id ? ` (${sa.provider_id})` : ''
+      toast(`已绑定 SubAgent: ${sa.name}${provInfo}`)
+      await loadAll()
+    }
     else toast(r.data.message || '绑定失败', 'error')
   } catch (e: any) { toast(e?.response?.data?.message || '绑定失败', 'error') }
   finally { addingMember.value = false }
